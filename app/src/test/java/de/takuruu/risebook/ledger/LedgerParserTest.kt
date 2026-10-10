@@ -53,7 +53,7 @@ class LedgerParserTest {
         assertEquals(LocalDate.of(2025, 1, 15), txn.date)
         assertEquals("Bakery", txn.payee)
         assertEquals(2, txn.postings.size)
-        assertEquals(4.5, txn.postings[0].amount!!)
+        assertEquals(4.5, txn.postings[0].amount!!, 1e-9)
         assertNull(txn.postings[1].amount)
         assertTrue(txn.balanced())
     }

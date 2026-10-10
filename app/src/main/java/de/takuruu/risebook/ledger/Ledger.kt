@@ -58,7 +58,7 @@ object LedgerParser {
         val m = Regex("""^(-?\d+(?:\.\d+)?)(?:\s+(\S+))?$""").matchEntire(text.trim())
             ?: return null
         val value = m.groupValues[1].toDouble()
-        val commodity = m.groups[3]?.value ?: "€"
+        val commodity = m.groups[2]?.value ?: "€"
         return value to commodity
     }
 

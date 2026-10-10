@@ -12,10 +12,13 @@ import java.io.File
  * exposes parsed transactions as a state flow.
  */
 class JournalRepository(context: Context) {
-    private val file = File(context.filesDir, "risebook.ledger")
+    val file: File = File(context.filesDir, "risebook.ledger")
 
     private val _transactions = MutableStateFlow<List<Transaction>>(emptyList())
     val transactions: StateFlow<List<Transaction>> = _transactions
+
+    fun accounts(): List<String> =
+        _transactions.value.flatMap { txn -> txn.postings.map { it.account } }.distinct()
 
     init {
         reload()

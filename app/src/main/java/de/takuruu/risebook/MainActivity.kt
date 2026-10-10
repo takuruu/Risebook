@@ -1,41 +1,38 @@
 package de.takuruu.risebook
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import de.takuruu.risebook.data.JournalRepository
-import de.takuruu.risebook.ledger.LedgerParser
-import de.takuruu.risebook.ledger.Posting
-import de.takuruu.risebook.ledger.Transaction
-import java.time.LocalDate
+import de.takuruu.risebook.ui.AddTransactionDialog
+import de.takuruu.risebook.ui.BalanceScreen
+import de.takuruu.risebook.ui.JournalScreen
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,44 +46,64 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class Screen(val title: String) {
+    Journal("Journal"),
+    Balance("Balance")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RisebookApp(repository: JournalRepository) {
-    val transactions by repository.transactions.collectAsState()
+    var screen by remember { mutableStateOf(Screen.Journal) }
     var showAddDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Risebook") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Risebook") },
+                actions = {
+                    IconButton(onClick = { shareJournal(context, repository.file) }) {
+                        Icon(Icons.Default.Share, contentDescription = "Journal teilen/exportieren")
+                    }
+                }
+            )
+        },
+        bottomBar = {
+            NavigationBar {
+                Screen.entries.forEach { s ->
+                    NavigationBarItem(
+                        selected = screen == s,
+                        onClick = { screen = s },
+                        icon = {
+                            Icon(
+                                if (s == Screen.Journal) Icons.Default.List else Icons.Default.Add,
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text(s.title) }
+                    )
+                }
+            }
+        },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Add transaction")
+            if (screen == Screen.Journal) {
+                FloatingActionButton(onClick = { showAddDialog = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "Buchung hinzufügen")
+                }
             }
         }
     ) { padding ->
-        if (transactions.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    "Noch keine Buchungen.\nTippe auf +, um deine erste\nBuchung zu erfassen.",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)
-            ) {
-                items(transactions.asReversed()) { txn ->
-                    TransactionCard(txn)
-                }
-            }
+        val modifier = Modifier.padding(padding)
+        when (screen) {
+            Screen.Journal -> JournalScreen(repository, modifier)
+            Screen.Balance -> BalanceScreen(repository, modifier)
         }
     }
 
     if (showAddDialog) {
         AddTransactionDialog(
+            knownAccounts = repository.accounts(),
             onDismiss = { showAddDialog = false },
             onSave = { txn ->
                 repository.append(txn)
@@ -96,94 +113,16 @@ fun RisebookApp(repository: JournalRepository) {
     }
 }
 
-@Composable
-fun TransactionCard(txn: Transaction) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("${txn.date} ${txn.payee}", style = MaterialTheme.typography.titleMedium)
-            txn.postings.forEach { p ->
-                val amountText = p.amount?.let { "%.2f %s".format(it, p.commodity) } ?: "auto"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(p.account, style = MaterialTheme.typography.bodyMedium)
-                    Text(amountText, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
+private fun shareJournal(context: android.content.Context, file: File) {
+    if (!file.exists()) {
+        android.widget.Toast.makeText(context, "Kein Journal vorhanden", android.widget.Toast.LENGTH_SHORT).show()
+        return
     }
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, "Journal exportieren"))
 }
-
-@Composable
-fun AddTransactionDialog(onDismiss: () -> Unit, onSave: (Transaction) -> Unit) {
-    var payee by remember { mutableStateOf("") }
-    var account1 by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
-    var account2 by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Neue Buchung") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = payee,
-                    onValueChange = { payee = it },
-                    label = { Text("Payee") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = account1,
-                    onValueChange = { account1 = it },
-                    label = { Text("Soll-Konto (z. B. Expenses:Groceries)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = amount,
-                    onValueChange = { amount = it },
-                    label = { Text("Betrag (z. B. 12.50)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = account2,
-                    onValueChange = { account2 = it },
-                    label = { Text("Haben-Konto (leer = Assets:Cash)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val parsed = LedgerParser.parseAmount(amount)
-                when {
-                    payee.isBlank() -> error = "Payee fehlt"
-                    account1.isBlank() -> error = "Soll-Konto fehlt"
-                    parsed == null -> error = "Betrag ungültig"
-                    else -> {
-                        val acc2 = account2.ifBlank { "Assets:Cash" }
-                        if (!LedgerParser.isValidAccount(account1) || !LedgerParser.isValidAccount(acc2)) {
-                            error = "Kontoname ungültig (Format: Expenses:Groceries)"
-                        } else {
-                            onSave(
-                                Transaction(
-                                    date = LocalDate.now(),
-                                    payee = payee.trim(),
-                                    postings = listOf(
-                                        Posting(account1.trim(), parsed.first, parsed.second),
-                                        Posting(acc2.trim())
-                                    )
-                                )
-                            )
-                        }
-                    }
-                }
-            }) { Text("Speichern") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } }
-    )
-}
-
-

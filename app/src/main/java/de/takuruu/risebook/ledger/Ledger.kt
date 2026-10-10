@@ -50,11 +50,9 @@ object LedgerParser {
         """^(\d{4}[-/.]\d{2}[-/.]\d{2})\s+(?:(!|\*)\s+)?(?:\([^)]*\)\s+)?(.*)$"""
     )
     private val postingRegex = Regex(
-        """^\s+([A-Za-z][\w:]*)(?:\s{2,}|\t)(.*)$"""
+        """^\s+([A-Za-z][\w:]*)(?:\s+(.*))?$"""
     )
-    private val amountRegex = Regex(
-        """^(-?\d+(?:\.\d+)?)?(?:\s+([A-Za-z€$£]\S*|\"[^\"]+\"))?\s*(?:;.*)?$"""
-    )
+    private val numberRegex = Regex("""-?\d+(?:\.\d+)?""")
     private val accountRegex = Regex("""^[A-Z]\w*(:[A-Z]\w*)*$""")
 
     fun isValidAccount(name: String): Boolean = accountRegex.matches(name)
@@ -95,11 +93,20 @@ object LedgerParser {
                 postingRegex.matchEntire(line)?.let { m ->
                     val account = m.groupValues[1]
                     val rest = m.groupValues[2].trim()
-                    val amountMatch = amountRegex.matchEntire(rest)
-                        ?: throw IllegalArgumentException("cannot parse amount: $rest")
-                    val amountText = amountMatch.groups[1]?.value
-                    val commodity = amountMatch.groups[2]?.value?.removeSurrounding("\"") ?: "€"
-                    postings += Posting(account, amountText?.toDouble(), commodity)
+                    val withoutComment = rest.substringBefore(";").trim()
+                    if (withoutComment.isEmpty()) {
+                        postings += Posting(account, null, "€")
+                    } else {
+                        val numberMatch = numberRegex.find(withoutComment)
+                            ?: throw IllegalArgumentException("cannot parse amount: $withoutComment")
+                        val amount = numberMatch.value.toDouble()
+                        val commodity = withoutComment
+                            .replace(numberMatch.value, "")
+                            .trim()
+                            .removeSurrounding("\"")
+                            .ifEmpty { "€" }
+                        postings += Posting(account, amount, commodity)
+                    }
                 } != null -> {}
                 else -> throw IllegalArgumentException("cannot parse line: $line")
             }

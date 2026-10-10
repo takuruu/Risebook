@@ -1,6 +1,7 @@
 package de.takuruu.risebook.data
 
 import android.content.Context
+import de.takuruu.risebook.ledger.Budget
 import de.takuruu.risebook.ledger.LedgerParser
 import de.takuruu.risebook.ledger.Transaction
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,18 +20,82 @@ class JournalRepository(context: Context) {
     private val _transactions = MutableStateFlow<List<Transaction>>(emptyList())
     val transactions: StateFlow<List<Transaction>> = _transactions
 
+    private val _budgets = MutableStateFlow<List<Budget>>(emptyList())
+    val budgets: StateFlow<List<Budget>> = _budgets
+
     fun accounts(): List<String> =
         _transactions.value.flatMap { txn -> txn.postings.map { it.account } }.distinct()
+
+    fun reload() {
+        val text = if (file.exists()) file.readText() else ""
+        _transactions.value = runCatching { LedgerParser.parse(text) }.getOrDefault(emptyList())
+        _budgets.value = LedgerParser.parseBudgets(text)
+    }
 
     init {
         reload()
     }
 
-    fun reload() {
-        _transactions.value = if (file.exists()) {
-            runCatching { LedgerParser.parse(file.readText()) }.getOrDefault(emptyList())
-        } else {
-            emptyList()
+    init {
+        reload()
+    }
+
+    fun setBudget(account: String, amount: Double) {
+        require(LedgerParser.isValidAccount(account)) { "Kontoname ungültig" }
+        val existing = LedgerParser.parseBudgets(file.readText())
+            .filter { it.account != account }
+        val updated = existing + Budget(account, amount)
+        rewriteBudgets(updated)
+        reload()
+    }
+
+    fun removeBudget(account: String) {
+        val updated = LedgerParser.parseBudgets(file.readText())
+            .filter { it.account != account }
+        rewriteBudgets(updated)
+        reload()
+    }
+
+    private fun rewriteBudgets(budgets: List<Budget>) {
+        val text = file.readText()
+        val withoutBudgets = text.lineSequence()
+            .filter { line ->
+                val t = line.trim()
+                !t.startsWith("~")
+            }
+            .joinToString("\n")
+        val budgetBlock = budgets.joinToString("\n") {
+            "~ monthly\n    ${it.account}          ${"%.2f".format(it.amount)} ${it.commodity}"
+        }
+        file.writeText(listOf(withoutBudgets.trim(), budgetBlock).filter { it.isNotBlank() }.joinToString("\n\n") + "\n")
+    }
+
+    /** Ausgaben des laufenden Monats pro Budget-Konto, Unterkonten inklusive. */
+    fun monthlySpending(): Map<String, Double> {
+        val now = java.time.LocalDate.now()
+        val totals = mutableMapOf<String, Double>()
+        _transactions.value.forEach { txn ->
+            if (txn.date.year == now.year && txn.date.month == now.month) {
+                txn.postings.forEach { p ->
+                    if (p.account.startsWith("Expenses")) {
+                        totals.merge(p.account, p.effectiveAmount, Double::plus)
+                    }
+                }
+            }
+        }
+        return totals
+    }
+
+    /** Aggregierte Ist-Werte passend zu den Budget-Konten (inkl. Unterkonten). */
+    fun budgetProgress(): List<Triple<Budget, Double, Double>> {
+        val spending = monthlySpending()
+        return _budgets.value.map { budget ->
+            val actual = spending.entries
+                .filter { (account, _) ->
+                    account == budget.account || account.startsWith(budget.account + ":")
+                }
+                .sumOf { it.value }
+            Triple(budget, actual, budget.amount)
         }
     }
 

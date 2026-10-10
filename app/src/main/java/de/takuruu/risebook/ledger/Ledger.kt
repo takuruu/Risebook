@@ -10,6 +10,15 @@ data class Posting(
     val effectiveAmount: Double get() = amount ?: 0.0
 }
 
+data class Budget(
+    val account: String,
+    val amount: Double,
+    val commodity: String = "€"
+)
+
+fun List<Budget>.forAccount(account: String): Budget? =
+    firstOrNull { account == it.account || account.startsWith(it.account + ":") }
+
 data class Transaction(
     val date: LocalDate,
     val payee: String,
@@ -54,6 +63,7 @@ object LedgerParser {
     )
     private val numberRegex = Regex("""-?\d+(?:\.\d+)?""")
     private val accountRegex = Regex("""^[A-Z]\w*(:[A-Z]\w*)*$""")
+    private val budgetHeaderRegex = Regex("""^~\s+monthly.*$""")
 
     fun isValidAccount(name: String): Boolean = accountRegex.matches(name)
 
@@ -70,20 +80,22 @@ object LedgerParser {
         var date: LocalDate? = null
         var payee: String? = null
         var note: String? = null
+        var inBudget = false
         var postings = mutableListOf<Posting>()
 
         fun flush() {
             if (date != null && payee != null) {
                 transactions += Transaction(date!!, payee!!, postings.toList(), note)
             }
-            date = null; payee = null; note = null; postings = mutableListOf()
+            date = null; payee = null; note = null; postings = mutableListOf(); inBudget = false
         }
 
         text.lineSequence().forEach { line ->
             val trimmed = line.trim()
             when {
                 trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith(";") -> {}
-                headerRegex.matchEntire(trimmed)?.let { m ->
+                budgetHeaderRegex.matchEntire(trimmed) != null -> { flush(); inBudget = true }
+                !inBudget && headerRegex.matchEntire(trimmed)?.let { m ->
                     flush()
                     val rawDate = m.groupValues[1].replace('/', '-').replace('.', '-')
                     date = LocalDate.parse(rawDate)
@@ -113,5 +125,24 @@ object LedgerParser {
         }
         flush()
         return transactions
+    }
+
+    fun parseBudgets(text: String): List<Budget> {
+        val budgets = mutableListOf<Budget>()
+        var inBudget = false
+        text.lineSequence().forEach { line ->
+            val trimmed = line.trim()
+            when {
+                budgetHeaderRegex.matchEntire(trimmed) != null -> inBudget = true
+                trimmed.isEmpty() -> inBudget = false
+                inBudget -> {
+                    val rest = trimmed.substringBefore(";").trim()
+                    val account = rest.split(Regex("\\s{2,}")).firstOrNull() ?: return@forEach
+                    val number = numberRegex.find(rest)?.value ?: return@forEach
+                    budgets += Budget(account, number.toDouble())
+                }
+            }
+        }
+        return budgets
     }
 }

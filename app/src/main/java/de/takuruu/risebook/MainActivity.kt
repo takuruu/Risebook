@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -42,6 +43,7 @@ import de.takuruu.risebook.data.JournalRepository
 import de.takuruu.risebook.ledger.Transaction
 import de.takuruu.risebook.ui.AddTransactionDialog
 import de.takuruu.risebook.ui.BalanceScreen
+import de.takuruu.risebook.ui.BudgetScreen
 import de.takuruu.risebook.ui.JournalScreen
 import kotlinx.coroutines.launch
 import java.io.File
@@ -60,7 +62,8 @@ class MainActivity : ComponentActivity() {
 
 private enum class Screen(val title: String) {
     Journal("Journal"),
-    Balance("Balance")
+    Balance("Balance"),
+    Budget("Budget")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -147,7 +150,11 @@ fun RisebookApp(repository: JournalRepository) {
                         onClick = { screen = s },
                         icon = {
                             Icon(
-                                if (s == Screen.Journal) Icons.Default.List else Icons.Default.Add,
+                                when (s) {
+                                    Screen.Journal -> Icons.Default.List
+                                    Screen.Balance -> Icons.Default.Add
+                                    Screen.Budget -> Icons.Default.Savings
+                                },
                                 contentDescription = null
                             )
                         },
@@ -176,6 +183,7 @@ fun RisebookApp(repository: JournalRepository) {
                 }
             )
             Screen.Balance -> BalanceScreen(repository, modifier)
+            Screen.Budget -> BudgetScreen(repository, modifier)
         }
     }
 

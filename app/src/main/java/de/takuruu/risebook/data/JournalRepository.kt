@@ -72,6 +72,16 @@ class JournalRepository(context: Context) {
         return imported.size
     }
 
+    fun balances(): Map<String, Double> {
+        val totals = mutableMapOf<String, Double>()
+        _transactions.value.forEach { txn ->
+            effectiveAmounts(txn).forEach { (account, value) ->
+                totals.merge(account, value, Double::plus)
+            }
+        }
+        return totals
+    }
+
     private fun effectiveAmounts(txn: Transaction): List<Pair<String, Double>> =
         txn.postings.map { p ->
             val remainder = -txn.postings.filter { it.amount != null }.sumOf { it.amount!! }

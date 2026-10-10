@@ -1,12 +1,14 @@
 package de.takuruu.risebook.data
 
 import android.content.Context
-import de.takuruu.risebook.ledger.Budget
+import de.takuruu.risebook.ledger.Envelope
 import de.takuruu.risebook.ledger.LedgerParser
+import de.takuruu.risebook.ledger.Posting
 import de.takuruu.risebook.ledger.Transaction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
+import java.time.LocalDate
 
 enum class ImportMode { Replace, Append }
 
@@ -20,84 +22,20 @@ class JournalRepository(context: Context) {
     private val _transactions = MutableStateFlow<List<Transaction>>(emptyList())
     val transactions: StateFlow<List<Transaction>> = _transactions
 
-    private val _budgets = MutableStateFlow<List<Budget>>(emptyList())
-    val budgets: StateFlow<List<Budget>> = _budgets
+    init {
+        reload()
+    }
+
+    fun reload() {
+        _transactions.value = if (file.exists()) {
+            runCatching { LedgerParser.parse(file.readText()) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+    }
 
     fun accounts(): List<String> =
         _transactions.value.flatMap { txn -> txn.postings.map { it.account } }.distinct()
-
-    fun reload() {
-        val text = if (file.exists()) file.readText() else ""
-        _transactions.value = runCatching { LedgerParser.parse(text) }.getOrDefault(emptyList())
-        _budgets.value = LedgerParser.parseBudgets(text)
-    }
-
-    init {
-        reload()
-    }
-
-    init {
-        reload()
-    }
-
-    fun setBudget(account: String, amount: Double) {
-        require(LedgerParser.isValidAccount(account)) { "Kontoname ungültig" }
-        val existing = LedgerParser.parseBudgets(file.readText())
-            .filter { it.account != account }
-        val updated = existing + Budget(account, amount)
-        rewriteBudgets(updated)
-        reload()
-    }
-
-    fun removeBudget(account: String) {
-        val updated = LedgerParser.parseBudgets(file.readText())
-            .filter { it.account != account }
-        rewriteBudgets(updated)
-        reload()
-    }
-
-    private fun rewriteBudgets(budgets: List<Budget>) {
-        val text = file.readText()
-        val withoutBudgets = text.lineSequence()
-            .filter { line ->
-                val t = line.trim()
-                !t.startsWith("~")
-            }
-            .joinToString("\n")
-        val budgetBlock = budgets.joinToString("\n") {
-            "~ monthly\n    ${it.account}          ${"%.2f".format(it.amount)} ${it.commodity}"
-        }
-        file.writeText(listOf(withoutBudgets.trim(), budgetBlock).filter { it.isNotBlank() }.joinToString("\n\n") + "\n")
-    }
-
-    /** Ausgaben des laufenden Monats pro Budget-Konto, Unterkonten inklusive. */
-    fun monthlySpending(): Map<String, Double> {
-        val now = java.time.LocalDate.now()
-        val totals = mutableMapOf<String, Double>()
-        _transactions.value.forEach { txn ->
-            if (txn.date.year == now.year && txn.date.month == now.month) {
-                txn.postings.forEach { p ->
-                    if (p.account.startsWith("Expenses")) {
-                        totals.merge(p.account, p.effectiveAmount, Double::plus)
-                    }
-                }
-            }
-        }
-        return totals
-    }
-
-    /** Aggregierte Ist-Werte passend zu den Budget-Konten (inkl. Unterkonten). */
-    fun budgetProgress(): List<Triple<Budget, Double, Double>> {
-        val spending = monthlySpending()
-        return _budgets.value.map { budget ->
-            val actual = spending.entries
-                .filter { (account, _) ->
-                    account == budget.account || account.startsWith(budget.account + ":")
-                }
-                .sumOf { it.value }
-            Triple(budget, actual, budget.amount)
-        }
-    }
 
     fun append(transaction: Transaction) {
         val text = if (file.exists() && file.readText().isNotEmpty()) "\n" else ""
@@ -134,16 +72,78 @@ class JournalRepository(context: Context) {
         return imported.size
     }
 
-    fun balances(): Map<String, Double> {
-        val totals = mutableMapOf<String, Double>()
+    private fun effectiveAmounts(txn: Transaction): List<Pair<String, Double>> =
+        txn.postings.map { p ->
+            val remainder = -txn.postings.filter { it.amount != null }.sumOf { it.amount!! }
+            p.account to (p.amount ?: remainder)
+        }
+
+    /**
+     * Envelope model: assignment transactions book Budget:X against
+     * Equity:Budgettopf; expenses are real transactions. Available per
+     * envelope = assigned total - spent total (all time, so leftover
+     * money naturally rolls over into the next month).
+     */
+    fun envelopes(): List<Envelope> {
+        val now = LocalDate.now()
+        val assignedTotal = mutableMapOf<String, Double>()
+        val spentTotal = mutableMapOf<String, Double>()
+        val assignedMonth = mutableMapOf<String, Double>()
+        val spentMonth = mutableMapOf<String, Double>()
+
         _transactions.value.forEach { txn ->
-            val explicit = txn.postings.filter { it.amount != null }
-            val remainder = -explicit.sumOf { it.amount!! }
-            txn.postings.forEach { p ->
-                val value = p.amount ?: remainder
-                totals.merge(p.account, value, Double::plus)
+            val hasBudgetPosting = txn.postings.any { it.account.startsWith("Budget:") }
+            val hasEquityPosting = txn.postings.any { it.account == "Equity:Budgettopf" }
+            val amounts = effectiveAmounts(txn)
+            val isAssignment = hasBudgetPosting && hasEquityPosting
+            val thisMonth = txn.date.year == now.year && txn.date.month == now.month
+
+            amounts.forEach { (account, value) ->
+                if (isAssignment && account.startsWith("Budget:")) {
+                    assignedTotal.merge(account, value, Double::plus)
+                    if (thisMonth) assignedMonth.merge(account, value, Double::plus)
+                } else if (!isAssignment && account.startsWith("Expenses:")) {
+                    val envelopeAccount = "Budget:" + account.removePrefix("Expenses:")
+                    if (assignedTotal.containsKey(envelopeAccount) ||
+                        spentTotal.containsKey(envelopeAccount) ||
+                        assignedMonth.containsKey(envelopeAccount)
+                    ) {
+                        spentTotal.merge(envelopeAccount, value, Double::plus)
+                        if (thisMonth) spentMonth.merge(envelopeAccount, value, Double::plus)
+                    }
+                }
             }
         }
-        return totals
+
+        return (assignedTotal.keys + spentTotal.keys).distinct().sorted().map { account ->
+            Envelope(
+                account = account,
+                assignedTotal = assignedTotal[account] ?: 0.0,
+                spentTotal = spentTotal[account] ?: 0.0,
+                assignedThisMonth = assignedMonth[account] ?: 0.0,
+                spentThisMonth = spentMonth[account] ?: 0.0
+            )
+        }
     }
+
+    /** Assign money to an envelope for the given month as a real transaction. */
+    fun assignToEnvelope(envelopeAccount: String, amount: Double, month: LocalDate) {
+        require(envelopeAccount.startsWith("Budget:")) { "Umschlag muss mit Budget: beginnen" }
+        require(amount > 0) { "Betrag muss positiv sein" }
+        append(
+            Transaction(
+                date = month,
+                payee = "Budget-Zuweisung ${month.year}-${"%02d".format(month.monthValue)}",
+                postings = listOf(
+                    Posting(envelopeAccount, amount),
+                    Posting("Equity:Budgettopf", -amount)
+                )
+            )
+        )
+    }
+
+    /** Available to budget: money assigned this month but not yet in an envelope expense side. */
+    fun availableToBudget(): Double =
+        envelopes().sumOf { it.available } * -1.0 +
+            envelopes().sumOf { it.assignedThisMonth - it.spentThisMonth }
 }

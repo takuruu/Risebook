@@ -10,16 +10,15 @@ data class Posting(
     val effectiveAmount: Double get() = amount ?: 0.0
 }
 
-data class Budget(
+data class Envelope(
     val account: String,
-    val amount: Double,
-    val commodity: String = "€"
-)
-
-fun List<Budget>.forAccount(account: String): Budget? =
-    firstOrNull { account == it.account || account.startsWith(it.account + ":") }
-
-data class Transaction(
+    val assignedTotal: Double,
+    val spentTotal: Double,
+    val assignedThisMonth: Double,
+    val spentThisMonth: Double
+) {
+    val available: Double get() = assignedTotal - spentTotal
+}
     val date: LocalDate,
     val payee: String,
     val postings: List<Posting>,
@@ -63,7 +62,7 @@ object LedgerParser {
     )
     private val numberRegex = Regex("""-?\d+(?:\.\d+)?""")
     private val accountRegex = Regex("""^[A-Z]\w*(:[A-Z]\w*)*$""")
-    private val budgetHeaderRegex = Regex("""^~\s+monthly.*$""")
+    private val budgetHeaderRegex = Regex("""^~.*$""")
 
     fun isValidAccount(name: String): Boolean = accountRegex.matches(name)
 
@@ -94,7 +93,7 @@ object LedgerParser {
             val trimmed = line.trim()
             when {
                 trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith(";") -> {}
-                budgetHeaderRegex.matchEntire(trimmed) != null -> { flush(); inBudget = true }
+                budgetHeaderRegex.matchEntire(trimmed) != null -> { flush() }
                 headerRegex.matchEntire(trimmed)?.let { m ->
                     flush()
                     val rawDate = m.groupValues[1].replace('/', '-').replace('.', '-')
@@ -125,24 +124,5 @@ object LedgerParser {
         }
         flush()
         return transactions
-    }
-
-    fun parseBudgets(text: String): List<Budget> {
-        val budgets = mutableListOf<Budget>()
-        var inBudget = false
-        text.lineSequence().forEach { line ->
-            val trimmed = line.trim()
-            when {
-                budgetHeaderRegex.matchEntire(trimmed) != null -> inBudget = true
-                trimmed.isEmpty() -> inBudget = false
-                inBudget -> {
-                    val rest = trimmed.substringBefore(";").trim()
-                    val account = rest.split(Regex("\\s{2,}")).firstOrNull() ?: return@forEach
-                    val number = numberRegex.find(rest)?.value ?: return@forEach
-                    budgets += Budget(account, number.toDouble())
-                }
-            }
-        }
-        return budgets
     }
 }

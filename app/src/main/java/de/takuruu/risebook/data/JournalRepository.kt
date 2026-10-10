@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
+enum class ImportMode { Replace, Append }
+
 /**
  * Stores the journal as a plain .ledger file in the app's private storage and
  * exposes parsed transactions as a state flow.
@@ -36,6 +38,35 @@ class JournalRepository(context: Context) {
         val text = if (file.exists() && file.readText().isNotEmpty()) "\n" else ""
         file.appendText(text + transaction.format())
         reload()
+    }
+
+    fun replaceAll(transactions: List<Transaction>) {
+        file.writeText(transactions.joinToString("\n") { it.validated().format() })
+        reload()
+    }
+
+    fun update(old: Transaction, new: Transaction) {
+        val list = _transactions.value.toMutableList()
+        val index = list.indexOf(old)
+        require(index >= 0) { "transaction not found in journal" }
+        list[index] = new
+        replaceAll(list)
+    }
+
+    fun delete(transaction: Transaction) {
+        replaceAll(_transactions.value - transaction)
+    }
+
+    fun import(text: String, mode: ImportMode): Int {
+        val imported = LedgerParser.parse(text).map { it.validated() }
+        if (imported.isEmpty()) throw IllegalArgumentException("Datei enthält keine Buchungen")
+        replaceAll(
+            when (mode) {
+                ImportMode.Replace -> imported
+                ImportMode.Append -> _transactions.value + imported
+            }
+        )
+        return imported.size
     }
 
     fun balances(): Map<String, Double> {

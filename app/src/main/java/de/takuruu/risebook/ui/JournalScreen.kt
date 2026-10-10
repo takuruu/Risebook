@@ -9,9 +9,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Card
+import androidx.compose.material3.DismissDirection
+import androidx.compose.material3.DismissValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwipeToDismiss
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDismissState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,7 +30,12 @@ import de.takuruu.risebook.data.JournalRepository
 import de.takuruu.risebook.ledger.Transaction
 
 @Composable
-fun JournalScreen(repository: JournalRepository, modifier: Modifier = Modifier) {
+fun JournalScreen(
+    repository: JournalRepository,
+    modifier: Modifier = Modifier,
+    onEdit: (Transaction) -> Unit = {},
+    onDelete: (Transaction) -> Unit = {}
+) {
     val transactions by repository.transactions.collectAsState()
 
     if (transactions.isEmpty()) {
@@ -41,27 +55,73 @@ fun JournalScreen(repository: JournalRepository, modifier: Modifier = Modifier) 
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(8.dp)
     ) {
-        items(transactions.asReversed()) { txn ->
-            TransactionCard(txn)
+        items(transactions.asReversed(), key = { it.hashCode() }) { txn ->
+            TransactionCard(txn, onEdit = { onEdit(txn) }, onDelete = { onDelete(txn) })
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TransactionCard(txn: Transaction) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("${txn.date} ${txn.payee}", style = MaterialTheme.typography.titleMedium)
-            txn.postings.forEach { p ->
-                val amountText = p.amount?.let { "%.2f %s".format(it, p.commodity) } ?: "auto"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(p.account, style = MaterialTheme.typography.bodyMedium)
-                    Text(amountText, style = MaterialTheme.typography.bodyMedium)
+fun TransactionCard(
+    txn: Transaction,
+    onEdit: () -> Unit = {},
+    onDelete: () -> Unit = {}
+) {
+    val dismissState = rememberDismissState(
+        confirmValueChange = { value ->
+            if (value == DismissValue.DismissedToEnd) {
+                onDelete()
+                true
+            } else {
+                false
+            }
+        }
+    )
+
+    SwipeToDismiss(
+        state = dismissState,
+        directions = setOf(DismissDirection.StartToEnd),
+        background = {},
+        dismissContent = {
+            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "${txn.date} ${txn.payee}",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Row {
+                            androidx.compose.material3.IconButton(onClick = onEdit) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Bearbeiten"
+                                )
+                            }
+                            androidx.compose.material3.IconButton(onClick = onDelete) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Löschen"
+                                )
+                            }
+                        }
+                    }
+                    txn.postings.forEach { p ->
+                        val amountText =
+                            p.amount?.let { "%.2f %s".format(it, p.commodity) } ?: "auto"
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(p.account, style = MaterialTheme.typography.bodyMedium)
+                            Text(amountText, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                 }
             }
         }
-    }
+    )
 }

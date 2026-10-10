@@ -95,7 +95,7 @@ object LedgerParser {
             when {
                 trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith(";") -> {}
                 budgetHeaderRegex.matchEntire(trimmed) != null -> { flush(); inBudget = true }
-                !inBudget && headerRegex.matchEntire(trimmed)?.let { m ->
+                headerRegex.matchEntire(trimmed)?.let { m ->
                     flush()
                     val rawDate = m.groupValues[1].replace('/', '-').replace('.', '-')
                     date = LocalDate.parse(rawDate)

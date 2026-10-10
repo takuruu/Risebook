@@ -32,7 +32,7 @@ class EnvelopeTest {
     }
 
     @Test
-    fun `leftover rolls over: previous month leftover adds to available`() {
+    fun `leftover rolls over into next month`() {
         val assignedTotal = 200.0 + 200.0
         val spentTotal = 150.0 + 0.0
         val env = Envelope("Budget:Food", assignedTotal, spentTotal, 200.0, 0.0)

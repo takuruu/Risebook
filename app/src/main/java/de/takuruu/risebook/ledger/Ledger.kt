@@ -46,9 +46,14 @@ data class Transaction(
 }
 
 object LedgerParser {
-    private val headerRegex = Regex("""^(\d{4}-\d{2}-\d{2})\s+\*\s+(.*)$""")
+    private val headerRegex = Regex(
+        """^(\d{4}[-/.]\d{2}[-/.]\d{2})\s+(?:(!|\*)\s+)?(?:\([^)]*\)\s+)?(.*)$"""
+    )
     private val postingRegex = Regex(
-        """^\s+([A-Za-z][\w:]*)(?:\s{2,}(-?\d+(?:\.\d+)?)(?:\s+(\S+))?)?\s*(?:;.*)?$"""
+        """^\s+([A-Za-z][\w:]*)(?:\s{2,}|\t)(.*)$"""
+    )
+    private val amountRegex = Regex(
+        """^(-?\d+(?:\.\d+)?)?(?:\s+([A-Za-z€$£]\S*|\"[^\"]+\"))?\s*(?:;.*)?$"""
     )
     private val accountRegex = Regex("""^[A-Z]\w*(:[A-Z]\w*)*$""")
 
@@ -82,14 +87,18 @@ object LedgerParser {
                 trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith(";") -> {}
                 headerRegex.matchEntire(trimmed)?.let { m ->
                     flush()
-                    date = LocalDate.parse(m.groupValues[1])
-                    payee = m.groupValues[2].trim()
+                    val rawDate = m.groupValues[1].replace('/', '-').replace('.', '-')
+                    date = LocalDate.parse(rawDate)
+                    payee = m.groupValues[3].trim().ifEmpty { "(unbenannt)" }
                 } != null -> {}
                 line.trimStart().startsWith(";") -> { note = line.trim().removePrefix(";").trim() }
                 postingRegex.matchEntire(line)?.let { m ->
                     val account = m.groupValues[1]
-                    val amountText = m.groups[2]?.value
-                    val commodity = m.groups[3]?.value ?: "€"
+                    val rest = m.groupValues[2].trim()
+                    val amountMatch = amountRegex.matchEntire(rest)
+                        ?: throw IllegalArgumentException("cannot parse amount: $rest")
+                    val amountText = amountMatch.groups[1]?.value
+                    val commodity = amountMatch.groups[2]?.value?.removeSurrounding("\"") ?: "€"
                     postings += Posting(account, amountText?.toDouble(), commodity)
                 } != null -> {}
                 else -> throw IllegalArgumentException("cannot parse line: $line")

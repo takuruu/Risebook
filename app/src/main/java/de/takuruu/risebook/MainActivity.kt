@@ -124,7 +124,7 @@ fun RisebookApp(repository: JournalRepository) {
                             onClick = {
                                 menuOpen = false
                                 importMode = ImportMode.Replace
-                                importLauncher.launch(arrayOf("text/*"))
+                                importLauncher.launch(arrayOf("*/*"))
                             }
                         )
                         DropdownMenuItem(
@@ -132,7 +132,7 @@ fun RisebookApp(repository: JournalRepository) {
                             onClick = {
                                 menuOpen = false
                                 importMode = ImportMode.Append
-                                importLauncher.launch(arrayOf("text/*"))
+                                importLauncher.launch(arrayOf("*/*"))
                             }
                         )
                     }

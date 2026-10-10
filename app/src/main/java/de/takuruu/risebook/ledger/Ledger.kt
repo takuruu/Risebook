@@ -19,6 +19,8 @@ data class Envelope(
 ) {
     val available: Double get() = assignedTotal - spentTotal
 }
+
+data class Transaction(
     val date: LocalDate,
     val payee: String,
     val postings: List<Posting>,

@@ -95,6 +95,8 @@ object LedgerParser {
         var note: String? = null
         var inBudget = false
         var postings = mutableListOf<Posting>()
+        val cleanText = text.removePrefix("\uFEFF")
+        var lineNumber = 0
 
         fun flush() {
             if (date != null && payee != null) {
@@ -103,7 +105,8 @@ object LedgerParser {
             date = null; payee = null; note = null; postings = mutableListOf(); inBudget = false
         }
 
-        text.lineSequence().forEach { line ->
+        cleanText.lineSequence().forEach { line ->
+            lineNumber++
             val trimmed = line.trim()
             when {
                 trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith(";") -> {}
@@ -123,7 +126,7 @@ object LedgerParser {
                         postings += Posting(account, null, "€")
                     } else {
                         val numberMatch = numberRegex.find(withoutComment)
-                            ?: throw IllegalArgumentException("cannot parse amount: $withoutComment")
+                            ?: throw IllegalArgumentException("Zeile $lineNumber: cannot parse amount: $withoutComment")
                         val amount = normalizeNumber(numberMatch.value)
                         val commodity = withoutComment
                             .replace(numberMatch.value, "")
@@ -133,7 +136,7 @@ object LedgerParser {
                         postings += Posting(account, amount, commodity)
                     }
                 } != null -> {}
-                else -> throw IllegalArgumentException("cannot parse line: $line")
+                else -> throw IllegalArgumentException("Zeile $lineNumber: cannot parse line: $line")
             }
         }
         flush()

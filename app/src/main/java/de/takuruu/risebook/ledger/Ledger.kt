@@ -62,16 +62,28 @@ object LedgerParser {
     private val postingRegex = Regex(
         """^\s+([A-Za-z][\w:]*)(?:\s+(.*))?$"""
     )
-    private val numberRegex = Regex("""-?\d+(?:\.\d+)?""")
+    private val numberRegex = Regex("""-?\d[\d.,]*""")
+
+    /** Accepts 4.50, 4,50 and German thousands format 1.234,56. */
+    fun normalizeNumber(text: String): Double {
+        val hasComma = text.contains(',')
+        val hasDot = text.contains('.')
+        val normalized = when {
+            hasComma && hasDot -> text.replace(".", "").replace(',', '.')
+            hasComma -> text.replace(',', '.')
+            else -> text
+        }
+        return normalized.toDouble()
+    }
     private val accountRegex = Regex("""^[A-Z]\w*(:[A-Z]\w*)*$""")
     private val budgetHeaderRegex = Regex("""^~.*$""")
 
     fun isValidAccount(name: String): Boolean = accountRegex.matches(name)
 
     fun parseAmount(text: String): Pair<Double, String>? {
-        val m = Regex("""^(-?\d+(?:\.\d+)?)(?:\s+(\S+))?$""").matchEntire(text.trim())
+        val m = Regex("""^(-?\d[\d.,]*)(?:\s+(\S+))?$""").matchEntire(text.trim())
             ?: return null
-        val value = m.groupValues[1].toDouble()
+        val value = normalizeNumber(m.groupValues[1])
         val commodity = m.groups[2]?.value ?: "€"
         return value to commodity
     }
@@ -112,7 +124,7 @@ object LedgerParser {
                     } else {
                         val numberMatch = numberRegex.find(withoutComment)
                             ?: throw IllegalArgumentException("cannot parse amount: $withoutComment")
-                        val amount = numberMatch.value.toDouble()
+                        val amount = normalizeNumber(numberMatch.value)
                         val commodity = withoutComment
                             .replace(numberMatch.value, "")
                             .trim()
